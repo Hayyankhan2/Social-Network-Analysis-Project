@@ -1,0 +1,55 @@
+# Load necessary libraries
+library(tidyverse)
+library(igraph)
+library(ggraph)
+
+# Load data
+emdat_data <- read.csv("Natural Disaster - 2000 to 2024 - EM-DAT Data.csv")
+
+# Ensure dates are properly formatted
+emdat_data <- emdat_data %>%
+  mutate(
+    Start.Date = as.Date(paste(Start.Year, Start.Month, Start.Day, sep = "-"), format = "%Y-%m-%d"),
+    End.Date = as.Date(paste(End.Year, End.Month, End.Day, sep = "-"), format = "%Y-%m-%d")
+  )
+
+# Filter data for years 2000-2010
+filtered_data <- emdat_data %>%
+  filter(Start.Year >= 2000 & Start.Year <= 2010) %>%
+  mutate(
+    Month_Year = paste(Start.Year, Start.Month, sep = "-"),
+    Week = strftime(Start.Date, format = "%U"),  # ISO week number
+    Year = Start.Year  # Explicit year column for grouping
+  )
+
+# Create country pairs with co-occurrences of the same disaster type, ignoring regions
+country_pairs <- filtered_data %>%
+  select(Country, Disaster.Type, Week, Month_Year, Year, Start.Date) %>%
+  distinct() %>%
+  inner_join(
+    filtered_data %>% select(Country, Disaster.Type, Week, Month_Year, Year, Start.Date),
+    by = c("Disaster.Type", "Year"),
+    suffix = c(".x", ".y")
+  ) %>%
+  filter(
+    Country.x != Country.y,  # Avoid self-pairs
+    abs(as.numeric(as.Date(Start.Date.x) - as.Date(Start.Date.y))) <= 7 |  # Allow a ±7-day window
+      Week.x == Week.y        # Match based on week numbers
+  ) %>%
+  group_by(Country.x, Country.y) %>%
+  summarize(weight = n(), .groups = 'drop')
+
+# Create graph from the edge list
+graph <- graph_from_data_frame(country_pairs, directed = FALSE)
+
+# Write the graph to a file for Gephi or further analysis
+library(here)
+write_graph(graph, file = here("Updated_Global_Project.graphml"), format = "graphml")
+
+# Optionally, visualize the network
+ggraph(graph, layout = "fr") +
+  geom_edge_link(aes(width = weight), alpha = 0.6) +
+  geom_node_point(size = 5) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_void() +
+  ggtitle("Global Country-Level Co-Occurrence of Natural Disasters (2000-2010)")
